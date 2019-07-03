@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import copy
 import math
+import pdb
+import collections
 #from appscript import app
 
 # Environment:
@@ -24,7 +26,14 @@ triggerSwitch = False  # if true, keyborad simulator works
 def printThreshold(thr):
     print("! Changed threshold to "+str(thr))
 
-
+def dist(a, b):
+    dx = a[0] - b[0]
+    dy = a[1] - b[1]
+    return (dx ** 2 + dy ** 2) ** .5
+def circle_intersect(ca, cb):
+    d = dist(ca['center'], cb['center'])
+    r = ca['radius'] + cb['radius']
+    return d < r
 def removeBG(frame):
     fgmask = bgModel.apply(frame,learningRate=learningRate)
     # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -39,6 +48,7 @@ def removeBG(frame):
 def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
     #  convexity defect
     hull = cv2.convexHull(res, returnPoints=False)
+    fingers = []
     if len(hull) > 3:
         defects = cv2.convexityDefects(res, hull)
         if type(defects) != type(None):  # avoid crashing.   (BUG not found)
@@ -56,8 +66,10 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
                 if angle <= math.pi / 2:  # angle less than 90 degree, treat as fingers
                     cnt += 1
                     cv2.circle(drawing, far, 8, [211, 84, 0], -1)
-            return True, cnt
-    return False, 0
+                    fingers.append(far)
+                
+            return True, cnt, fingers
+    return False, 0, []
 
 
 # Camera
@@ -68,7 +80,10 @@ cv2.createTrackbar('trh1', 'trackbar', threshold, 100, printThreshold)
 
 
 while camera.isOpened():
+    
+    
     ret, frame = camera.read()
+   
     threshold = cv2.getTrackbarPos('trh1', 'trackbar')
     frame = cv2.bilateralFilter(frame, 5, 50, 100)  # smoothing filter
     frame = cv2.flip(frame, 1)  # flip the frame horizontally
@@ -93,7 +108,8 @@ while camera.isOpened():
 
         # get the coutours
         thresh1 = copy.deepcopy(thresh)
-        _,contours, hierarchy = cv2.findContours(thresh1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        #pdb.set_trace()
+        contours, hierarchy = cv2.findContours(thresh1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         length = len(contours)
         maxArea = -1
         if length > 0:
@@ -105,16 +121,74 @@ while camera.isOpened():
                     ci = i
 
             res = contours[ci]
-            hull = cv2.convexHull(res)
+            hull_r = cv2.convexHull(res, returnPoints=False)
+            defects = cv2.convexityDefects(res, hull_r)
             drawing = np.zeros(img.shape, np.uint8)
-            cv2.drawContours(drawing, [res], 0, (0, 255, 0), 2)
+            hull = cv2.convexHull(res)
+            cv2.drawContours(drawing, [res], 0, (0, 255, 255), 2)
             cv2.drawContours(drawing, [hull], 0, (0, 0, 255), 3)
+ 
+            min_val = 0
+            
+            min_index = []
+            for i in range(hull.shape[0]):
+                x, y = hull[i, 0]
+                if y >= min_val:
+                    min_val = y
 
-            isFinishCal,cnt = calculateFingers(res,drawing)
+            x_val = []
+            for j in range(hull.shape[0]):
+                x, y = hull[j, 0]
+                if y == min_val:
+                    x_val.append(x)
+            avg_x = sum(x_val) / len(x_val)
+            palm = [int(avg_x), min_val]
+            cv2.circle(drawing, tuple(palm), 8, [100, 100, 100], 5)
+            isFinishCal, cnt, fingers = calculateFingers(res,drawing)
+            if len(fingers) > 0:
+                for i in range(len(fingers)):
+                    cv2.line(drawing, tuple(palm), fingers[i], [100, 100, 100], 2)
+            resource_table = {}
+            
+            if defects is None:
+                cv2.putText(drawing, 'no defects', (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 1, cv2.LINE_AA)
+                continue
+            for i in range(defects.shape[0]):
+                s, e, f, d = defects[i, 0]
+                far = res[f][0]
+                dis = dist(palm, far)
+                resource_table[dis] = i
+            #pdb.set_trace()
+            items = resource_table.items()
+            sort_items = sorted(items)
+            resource = []
+            for i in range(len(sort_items)):
+                if i < 4:
+                    resource.append(sort_items[i][1])
+
+            for pt in resource:
+                s, e, f, d = defects[pt, 0]
+                far = res[f][0]
+                cv2.circle(drawing, tuple(far), 8, [100, 100, 100], 5)
+
+            for index in range(0, len(resource) - 1):
+                for jndex in range(0, len(resource) - 1):
+                    if index != jndex:
+                        s, e, f, d = defects[resource[index], 0]
+                        s2, e2, f2, d2 = defects[resource[jndex], 0]
+                        far = res[f][0]
+                        far2 = res[f2][0]
+                        y = abs(far[1] - far2[1])
+                        if y < 20:
+                            cv2.line(drawing, tuple(far), tuple(far2), [211, 255, 0], 1)
+                            
+
             if triggerSwitch is True:
                 if isFinishCal is True and cnt <= 2:
                     print (cnt)
                     #app('System Events').keystroke(' ')  # simulate pressing blank space
+
+
                     
 
         cv2.imshow('output', drawing)
