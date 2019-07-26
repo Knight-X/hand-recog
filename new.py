@@ -4,6 +4,9 @@ import copy
 import math
 import pdb
 import collections
+import time
+from PIL import Image, ImageOps
+from math import atan2,degrees
 #from appscript import app
 
 # Environment:
@@ -12,7 +15,7 @@ import collections
 # opencv: 2.4.13
 
 # parameters
-cap_region_x_begin=0.5  # start point/total width
+cap_region_x_begin=0.4  # start point/total width
 cap_region_y_end=0.8  # start point/total width
 threshold = 60  #  BINARY threshold
 blurValue = 41  # GaussianBlur parameter
@@ -25,6 +28,11 @@ triggerSwitch = False  # if true, keyborad simulator works
 
 def printThreshold(thr):
     print("! Changed threshold to "+str(thr))
+
+def have_line(a, b):
+    c = (b[1] - a[1]) / (b[0] - a[0])
+    d = b[1] - c * b[0]
+    return c, d
 
 def dist(a, b):
     dx = a[0] - b[0]
@@ -49,6 +57,7 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
     #  convexity defect
     hull = cv2.convexHull(res, returnPoints=False)
     fingers = []
+    starts = []
     if len(hull) > 3:
         defects = cv2.convexityDefects(res, hull)
         if type(defects) != type(None):  # avoid crashing.   (BUG not found)
@@ -58,7 +67,7 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
                 s, e, f, d = defects[i][0]
                 start = tuple(res[s][0])
                 end = tuple(res[e][0])
-                far = tuple(res[f][0])
+                far = tuple(res[f][0])     
                 a = math.sqrt((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2)
                 b = math.sqrt((far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2)
                 c = math.sqrt((end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2)
@@ -67,9 +76,23 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
                     cnt += 1
                     cv2.circle(drawing, far, 8, [211, 84, 0], -1)
                     fingers.append(far)
-                
-            return True, cnt, fingers
-    return False, 0, []
+                    starts.append(start)
+                    ratio, offset = have_line(far, start)
+                    x = (far[1] - offset) / ratio
+                    print("distance is {}".format(dist(start, tuple((x, far[1])))))
+            fingers.sort()
+            thumbs = []
+            for i in range(defects.shape[0]):
+                s, e, f, d = defects[i][0]
+                start = tuple(res[s][0])
+                if len(fingers) > 0 and (fingers[0][0] - start[0]) > 50:
+                    thumbs.append(start)
+            if len(thumbs) > 0:
+                thumbs.sort()
+                starts.append(thumbs[0])
+            print("\n")
+            return True, cnt, fingers, starts
+    return False, 0, [], []
 
 
 # Camera
@@ -80,10 +103,7 @@ cv2.createTrackbar('trh1', 'trackbar', threshold, 100, printThreshold)
 
 
 while camera.isOpened():
-    
-    
     ret, frame = camera.read()
-   
     threshold = cv2.getTrackbarPos('trh1', 'trackbar')
     frame = cv2.bilateralFilter(frame, 5, 50, 100)  # smoothing filter
     frame = cv2.flip(frame, 1)  # flip the frame horizontally
@@ -96,19 +116,19 @@ while camera.isOpened():
         img = removeBG(frame)
         img = img[0:int(cap_region_y_end * frame.shape[0]),
                     int(cap_region_x_begin * frame.shape[1]):frame.shape[1]]  # clip the ROI
-        cv2.imshow('mask', img)
+        cv2.imshow('done', img)
 
         # convert the image into binary image
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (blurValue, blurValue), 0)
         cv2.imshow('blur', blur)
         ret, thresh = cv2.threshold(blur, threshold, 255, cv2.THRESH_BINARY)
+        #ret, thresh = cv2.threshold(blur, threshold, 255, cv2.THRESH_BINARY)
         cv2.imshow('ori', thresh)
 
 
         # get the coutours
         thresh1 = copy.deepcopy(thresh)
-        #pdb.set_trace()
         contours, hierarchy = cv2.findContours(thresh1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         length = len(contours)
         maxArea = -1
@@ -143,22 +163,32 @@ while camera.isOpened():
                     x_val.append(x)
             avg_x = sum(x_val) / len(x_val)
             palm = [int(avg_x), min_val]
-            cv2.circle(drawing, tuple(palm), 8, [100, 100, 100], 5)
-            isFinishCal, cnt, fingers = calculateFingers(res,drawing)
+            #cv2.circle(drawing, tuple(palm), 8, [100, 100, 100], 5)
+            isFinishCal, cnt, fingers, starts = calculateFingers(res, drawing)
+            '''
             if len(fingers) > 0:
                 for i in range(len(fingers)):
                     cv2.line(drawing, tuple(palm), fingers[i], [100, 100, 100], 2)
+            '''
+            for i in range(len(starts)):
+                cv2.line(drawing, tuple(palm), starts[i], [100, 100, 100], 2)
+                distancex = palm[0] - starts[i][0]
+                #distanceb = palm[1] - fingers[i][1]
+                #print(degrees(atan2(distanceb, distancex)))
+                #print(abs(distancex - distanceb))
+            
             resource_table = {}
             
             if defects is None:
                 cv2.putText(drawing, 'no defects', (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 1, cv2.LINE_AA)
                 continue
+                
             for i in range(defects.shape[0]):
                 s, e, f, d = defects[i, 0]
                 far = res[f][0]
                 dis = dist(palm, far)
                 resource_table[dis] = i
-            #pdb.set_trace()
+
             items = resource_table.items()
             sort_items = sorted(items)
             resource = []
@@ -169,27 +199,41 @@ while camera.isOpened():
             for pt in resource:
                 s, e, f, d = defects[pt, 0]
                 far = res[f][0]
-                cv2.circle(drawing, tuple(far), 8, [100, 100, 100], 5)
+                cv2.circle(drawing, tuple(far), 8, [100, 100, 100], -1)
 
-            for index in range(0, len(resource) - 1):
-                for jndex in range(0, len(resource) - 1):
-                    if index != jndex:
-                        s, e, f, d = defects[resource[index], 0]
-                        s2, e2, f2, d2 = defects[resource[jndex], 0]
-                        far = res[f][0]
-                        far2 = res[f2][0]
-                        y = abs(far[1] - far2[1])
-                        if y < 20:
-                            cv2.line(drawing, tuple(far), tuple(far2), [211, 255, 0], 1)
+            if (len(starts) == 5):
+                starts.sort()
+                ttt = starts[2]
+                right_harm = None
+                left_harm = None
+                min_distance = 9999
+                for index in range(0, len(resource) - 1):
+                    for jndex in range(0, len(resource) - 1):
+                        if index != jndex:
+                            s, e, f, d = defects[resource[index], 0]
+                            s2, e2, f2, d2 = defects[resource[jndex], 0]
+                            far = res[f][0]
+                            far2 = res[f2][0]
+                            y = abs(far[1] - far2[1])
+                            deltax = abs(far[0] - far2[1])
+                            two_places = (far[0] - ttt[0]) * (far2[0] - ttt[0])
+                            print("the y distance is {}, places is {}, deltax is {}".format(y, two_places, deltax))
+                            if y < 50 and deltax > 50  and ((far[0] - ttt[0]) * (far2[0] - ttt[0])) < 0:
+                                right_harm = far
+                                left_harm = far2
+                                min_distance = y
+                                print("min_distance is {}".format(y))
+                if right_harm is not None and left_harm is not None:
+                    cv2.line(drawing, tuple(right_harm), tuple(left_harm), [211, 255, 0], 1)
                             
 
             if triggerSwitch is True:
                 if isFinishCal is True and cnt <= 2:
                     print (cnt)
                     #app('System Events').keystroke(' ')  # simulate pressing blank space
+            
+            
 
-
-                    
 
         cv2.imshow('output', drawing)
 
@@ -203,6 +247,7 @@ while camera.isOpened():
         bgModel = cv2.createBackgroundSubtractorMOG2(0, bgSubThreshold)
         isBgCaptured = 1
         print( '!!!Background Captured!!!')
+        time.sleep(2)
     elif k == ord('r'):  # press 'r' to reset the background
         bgModel = None
         triggerSwitch = False
