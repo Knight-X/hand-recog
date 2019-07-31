@@ -34,6 +34,11 @@ def have_line(a, b):
     d = b[1] - c * b[0]
     return c, d
 
+def center_point(a, b):
+    x = (a[0] + b[0]) / 2
+    y = (a[1] + b[1]) / 2
+    return tuple((int(x), int(y)))
+
 def dist(a, b):
     dx = a[0] - b[0]
     dy = a[1] - b[1]
@@ -85,8 +90,10 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
             for i in range(defects.shape[0]):
                 s, e, f, d = defects[i][0]
                 start = tuple(res[s][0])
+                far = tuple(res[f][0])
                 if len(fingers) > 0 and (fingers[0][0] - start[0]) > 50:
                     thumbs.append(start)
+                    fingers.append(far)
             if len(thumbs) > 0:
                 thumbs.sort()
                 starts.append(thumbs[0])
@@ -146,7 +153,7 @@ while camera.isOpened():
             drawing = np.zeros(img.shape, np.uint8)
             hull = cv2.convexHull(res)
             cv2.drawContours(drawing, [res], 0, (0, 255, 255), 2)
-            cv2.drawContours(drawing, [hull], 0, (0, 0, 255), 3)
+            #cv2.drawContours(drawing, [hull], 0, (0, 0, 255), 3)
  
             min_val = 0
             
@@ -163,16 +170,16 @@ while camera.isOpened():
                     x_val.append(x)
             avg_x = sum(x_val) / len(x_val)
             palm = [int(avg_x), min_val]
-            #cv2.circle(drawing, tuple(palm), 8, [100, 100, 100], 5)
+
             isFinishCal, cnt, fingers, starts = calculateFingers(res, drawing)
             '''
             if len(fingers) > 0:
                 for i in range(len(fingers)):
                     cv2.line(drawing, tuple(palm), fingers[i], [100, 100, 100], 2)
             '''
-            for i in range(len(starts)):
-                cv2.line(drawing, tuple(palm), starts[i], [100, 100, 100], 2)
-                distancex = palm[0] - starts[i][0]
+            #for i in range(len(starts)):
+                #cv2.line(drawing, tuple(palm), starts[i], [100, 100, 100], 2)
+                #distancex = palm[0] - starts[i][0]
                 #distanceb = palm[1] - fingers[i][1]
                 #print(degrees(atan2(distanceb, distancex)))
                 #print(abs(distancex - distanceb))
@@ -218,13 +225,17 @@ while camera.isOpened():
                             deltax = abs(far[0] - far2[1])
                             two_places = (far[0] - ttt[0]) * (far2[0] - ttt[0])
                             print("the y distance is {}, places is {}, deltax is {}".format(y, two_places, deltax))
-                            if y < 50 and deltax > 50  and ((far[0] - ttt[0]) * (far2[0] - ttt[0])) < 0:
+                            if y < 20 and deltax > 50  and ((far[0] - ttt[0]) * (far2[0] - ttt[0])) < 0:
                                 right_harm = far
                                 left_harm = far2
                                 min_distance = y
                                 print("min_distance is {}".format(y))
                 if right_harm is not None and left_harm is not None:
                     cv2.line(drawing, tuple(right_harm), tuple(left_harm), [211, 255, 0], 1)
+                    center_palm = center_point(tuple(right_harm), tuple(left_harm))
+
+                    for i in range(len(starts)):
+                        cv2.line(drawing, tuple(center_palm), starts[i], [100, 100, 100], 2)
                             
 
             if triggerSwitch is True:
