@@ -34,6 +34,26 @@ def have_line(a, b):
     d = b[1] - c * b[0]
     return c, d
 
+def have_intersect(pointx, pointy, pointz):
+    line1s, line1o = have_line(pointx, pointy)
+    line2s = -1 / line1s
+    line2o = pointz[1] - (line2s * pointz[0])
+    x0 = (line1o - line2o) / (line2s - line1s)
+    y0 = x0 * line1s + line1o
+    return x0, y0
+
+def measure_length(fingers, tops, palm):
+    total_length = {}
+
+    for name, pos in tops.items():
+        if name != 'index':
+            x0, y0 = have_intersect(pos, palm, fingers[name])
+            total_length[name] = dist(pos, tuple((x0, y0)))
+    x0, y0 = have_intersect(tops['index'], palm, fingers['middle'])
+    total_length['index'] = dist(tops['index'], tuple((x0, y0)))
+    
+    return total_length
+        
 def center_point(a, b):
     x = (a[0] + b[0]) / 2
     y = (a[1] + b[1]) / 2
@@ -57,6 +77,32 @@ def removeBG(frame):
     res = cv2.bitwise_and(frame, frame, mask=fgmask)
     return res
 
+def distinguish_fingers(fingers, tops, drawing):
+    print("fingers....")
+    for g in fingers:
+        print(g)
+    print("starts....")
+    for g in tops:
+        print(g)
+    fingers_far = {}
+    fingers_top = {}
+    fingers_far['thumbs'] = fingers[0]
+    fingers_top['thumbs'] = tops[0]
+    cv2.circle(drawing, fingers[0], 8, [211, 84, 0], -1)
+    cv2.circle(drawing, tops[0], 8, [211, 84, 0], -1)
+    fingers_far['index'] = fingers[0]
+    fingers_top['index'] = tops[1]
+    fingers_far['middle'] = fingers[1]
+    fingers_top['middle'] = tops[2]
+    fingers_far['ring'] = fingers[2]
+    fingers_top['ring'] = tops[3]
+    fingers_far['pinky'] = fingers[3]
+    fingers_top['pinky'] = tops[4]
+    return fingers_far, fingers_top
+    
+
+
+
 
 def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
     #  convexity defect
@@ -79,7 +125,7 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
                 angle = math.acos((b ** 2 + c ** 2 - a ** 2) / (2 * b * c))  # cosine theorem
                 if angle <= math.pi / 2:  # angle less than 90 degree, treat as fingers
                     cnt += 1
-                    cv2.circle(drawing, far, 8, [211, 84, 0], -1)
+                    #cv2.circle(drawing, far, 8, [211, 84, 0], -1)
                     fingers.append(far)
                     starts.append(start)
                     ratio, offset = have_line(far, start)
@@ -87,23 +133,31 @@ def calculateFingers(res,drawing):  # -> finished bool, cnt: finger count
                     print("distance is {}".format(dist(start, tuple((x, far[1])))))
             fingers.sort()
             thumbs = []
+            fingers_far = {}
+            fingers_top = {}
+
             for i in range(defects.shape[0]):
                 s, e, f, d = defects[i][0]
                 start = tuple(res[s][0])
                 far = tuple(res[f][0])
                 if len(fingers) > 0 and (fingers[0][0] - start[0]) > 50:
                     thumbs.append(start)
-                    fingers.append(far)
+                    
             if len(thumbs) > 0:
                 thumbs.sort()
                 starts.append(thumbs[0])
+                fingers.sort()
+                starts.sort()
+            if len(fingers) == 4 and len(starts) == 5:
+                fingers_far, fingers_top = distinguish_fingers(fingers, starts, drawing)
             print("\n")
-            return True, cnt, fingers, starts
-    return False, 0, [], []
+            
+            return True, cnt, fingers, starts, fingers_far, fingers_top
+    return False, 0, [], [], {}, {}
 
 
 # Camera
-camera = cv2.VideoCapture(0)
+camera = cv2.VideoCapture(1)
 camera.set(10,200)
 cv2.namedWindow('trackbar')
 cv2.createTrackbar('trh1', 'trackbar', threshold, 100, printThreshold)
@@ -171,7 +225,7 @@ while camera.isOpened():
             avg_x = sum(x_val) / len(x_val)
             palm = [int(avg_x), min_val]
 
-            isFinishCal, cnt, fingers, starts = calculateFingers(res, drawing)
+            isFinishCal, cnt, fingers, starts, fingers_far, fingers_top = calculateFingers(res, drawing)
             '''
             if len(fingers) > 0:
                 for i in range(len(fingers)):
@@ -206,7 +260,7 @@ while camera.isOpened():
             for pt in resource:
                 s, e, f, d = defects[pt, 0]
                 far = res[f][0]
-                cv2.circle(drawing, tuple(far), 8, [100, 100, 100], -1)
+                #cv2.circle(drawing, tuple(far), 8, [100, 100, 100], -1)
 
             if (len(starts) == 5):
                 starts.sort()
@@ -233,6 +287,9 @@ while camera.isOpened():
                 if right_harm is not None and left_harm is not None:
                     cv2.line(drawing, tuple(right_harm), tuple(left_harm), [211, 255, 0], 1)
                     center_palm = center_point(tuple(right_harm), tuple(left_harm))
+                    total_length = measure_length(fingers_far, fingers_top, center_palm)
+                    for a, b in total_length.items():
+                        print("the length of {} is {}".format(a, b))
 
                     for i in range(len(starts)):
                         cv2.line(drawing, tuple(center_palm), starts[i], [100, 100, 100], 2)
